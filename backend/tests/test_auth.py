@@ -1,10 +1,12 @@
 """Authentication API tests."""
 
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin, get_current_doctor, get_current_patient
@@ -12,7 +14,8 @@ from app.db.session import SessionLocal
 from app.main import app
 from app.models import User
 from app.models.enums import UserRole
-from app.services.auth import create_user_with_role
+from app.schemas.auth import UserRegister
+from app.services.auth import create_patient_user, create_user_with_role
 
 client = TestClient(app)
 
@@ -88,6 +91,72 @@ def test_duplicate_email_returns_conflict() -> None:
     )
     assert first.status_code == 201
     assert second.status_code == 409
+    assert second.json()["detail"] == "Email already registered"
+
+
+def test_registration_rejects_short_password() -> None:
+    response = client.post(
+        "/api/auth/register",
+        json={"email": _email("short"), "password": "short", "full_name": "Test Patient"},
+    )
+    assert response.status_code == 422
+
+
+def test_registration_rejects_invalid_email() -> None:
+    response = client.post(
+        "/api/auth/register",
+        json={"email": "not-an-email", "password": "securepass1", "full_name": "Test Patient"},
+    )
+    assert response.status_code == 422
+
+
+def test_registration_rejects_missing_fields() -> None:
+    response = client.post("/api/auth/register", json={})
+    assert response.status_code == 422
+
+
+def _register_payload() -> UserRegister:
+    return UserRegister(
+        email=_email("integrity"),
+        password="securepass1",
+        full_name="Test Patient",
+    )
+
+
+def test_duplicate_email_integrity_error_on_flush_rolls_back() -> None:
+    db = MagicMock()
+    db.scalar.return_value = None
+    db.flush.side_effect = IntegrityError(
+        "INSERT INTO users",
+        {},
+        Exception("duplicate key value violates unique constraint"),
+    )
+    with pytest.raises(ValueError, match="Email already registered"):
+        create_patient_user(db, _register_payload())
+    db.rollback.assert_called()
+    db.commit.assert_not_called()
+
+
+def test_registration_database_error_rolls_back_and_reraises() -> None:
+    db = MagicMock()
+    db.scalar.side_effect = ProgrammingError(
+        "SELECT",
+        {},
+        Exception('relation "users" does not exist'),
+    )
+    with pytest.raises(ProgrammingError):
+        create_patient_user(db, _register_payload())
+    db.rollback.assert_called()
+    db.commit.assert_not_called()
+
+
+def test_registration_commit_failure_rolls_back_and_reraises() -> None:
+    db = MagicMock()
+    db.scalar.return_value = None
+    db.commit.side_effect = OperationalError("COMMIT", {}, Exception("server closed the connection"))
+    with pytest.raises(OperationalError):
+        create_patient_user(db, _register_payload())
+    db.rollback.assert_called()
 
 
 def test_login_returns_jwt() -> None:

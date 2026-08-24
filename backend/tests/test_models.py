@@ -95,3 +95,16 @@ def test_model_imports() -> None:
     assert NotificationLog.__tablename__ == "notification_logs"
     assert CalendarIntegration.__tablename__ == "calendar_integrations"
     assert CalendarEvent.__tablename__ == "calendar_events"
+
+
+def test_alembic_config_resolves_backend_paths() -> None:
+    from pathlib import Path
+
+    from app.db.migrate import _alembic_config
+
+    config = _alembic_config()
+    script = Path(config.get_main_option("script_location"))
+    assert (script / "env.py").is_file()
+    assert (script / "versions" / "0001_initial_schema.py").is_file()
+    assert (script / "versions" / "0002_working_hours_overlap.py").is_file()
+    assert (script / "versions" / "0003_visit_follow_up_instructions.py").is_file()

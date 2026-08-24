@@ -1,13 +1,17 @@
 """Authentication and user account services."""
 
+import logging
+
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import hash_password, verify_password
 from app.models import PatientProfile, User
 from app.models.enums import UserRole
 from app.schemas.auth import UserRegister
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_email(email: str) -> str:
@@ -31,26 +35,33 @@ def get_user_by_id(db: Session, user_id: int) -> User | None:
 
 def create_patient_user(db: Session, payload: UserRegister) -> User:
     email = normalize_email(payload.email)
-    if get_user_by_email(db, email) is not None:
-        raise ValueError("Email already registered")
-
-    user = User(
-        email=email,
-        hashed_password=hash_password(payload.password),
-        full_name=payload.full_name.strip(),
-        role=UserRole.PATIENT,
-        is_active=True,
-    )
-    db.add(user)
-    db.flush()
-    db.add(PatientProfile(user_id=user.id))
     try:
+        if get_user_by_email(db, email) is not None:
+            raise ValueError("Email already registered")
+
+        user = User(
+            email=email,
+            hashed_password=hash_password(payload.password),
+            full_name=payload.full_name.strip(),
+            role=UserRole.PATIENT.value,
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+        db.add(PatientProfile(user_id=user.id))
         db.commit()
+        db.refresh(user)
+        return user
+    except ValueError:
+        db.rollback()
+        raise
     except IntegrityError as exc:
         db.rollback()
         raise ValueError("Email already registered") from exc
-    db.refresh(user)
-    return user
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Registration failed")
+        raise
 
 
 def authenticate_user(db: Session, email: str, password: str) -> User | None:

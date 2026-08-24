@@ -1,5 +1,8 @@
 """CareConnect FastAPI application entrypoint."""
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +14,8 @@ from app.api.me import router as me_router
 from app.api.v1.router import api_router
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 PLACEHOLDER_JWT_SECRET = "replace-with-a-long-random-secret"
 
 
@@ -19,12 +24,25 @@ def _assert_runtime_secrets() -> None:
         raise RuntimeError("JWT_SECRET_KEY must be set before running in production")
 
 
+@asynccontextmanager
+async def lifespan(_application: FastAPI):
+    from app.db.migrate import run_alembic_upgrade
+
+    try:
+        run_alembic_upgrade()
+    except Exception:
+        logger.exception("Database migrations failed")
+        raise
+    yield
+
+
 def create_app() -> FastAPI:
     _assert_runtime_secrets()
     application = FastAPI(
         title=settings.APP_NAME,
         description="Healthcare Appointment & Follow-up Manager",
         version="0.1.0",
+        lifespan=lifespan,
     )
     application.add_middleware(
         CORSMiddleware,
