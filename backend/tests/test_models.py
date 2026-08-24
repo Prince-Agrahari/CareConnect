@@ -108,3 +108,23 @@ def test_alembic_config_resolves_backend_paths() -> None:
     assert (script / "versions" / "0001_initial_schema.py").is_file()
     assert (script / "versions" / "0002_working_hours_overlap.py").is_file()
     assert (script / "versions" / "0003_visit_follow_up_instructions.py").is_file()
+
+
+def test_0002_checks_pg_constraint_before_ddl() -> None:
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0002_working_hours_overlap.py"
+    ).read_text(encoding="utf-8")
+    assert "pg_constraint" in source
+    assert "ex_doctor_working_hours_no_overlap" in source
+    assert "duplicate_object" not in source
+    assert "EXCEPTION" not in source
+    assert "drop_all" not in source
+    assert "DROP TABLE" not in source
+    assert "DROP DATABASE" not in source
+    assert "DROP CONSTRAINT" not in source
+    assert "Base.metadata.drop_all" not in source
