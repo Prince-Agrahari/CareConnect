@@ -4,6 +4,26 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Browser origins that must always be accepted. An empty CORS_ORIGINS env value
+# (common when copying .env.example) would otherwise allow none.
+REQUIRED_CORS_ORIGINS = (
+    "http://localhost:5173",
+    "https://careconnect-frontend-32l4.onrender.com",
+)
+
+
+def parse_cors_origins(raw: str | None) -> list[str]:
+    text = (raw or "").strip().strip("\"'")
+    origins: list[str] = []
+    for part in text.split(","):
+        origin = part.strip().strip("\"'").rstrip("/")
+        if origin:
+            origins.append(origin)
+    for required in REQUIRED_CORS_ORIGINS:
+        if required not in origins:
+            origins.append(required)
+    return origins
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -15,7 +35,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "CareConnect"
     APP_ENV: str = "development"
     API_V1_PREFIX: str = "/api/v1"
-    CORS_ORIGINS: str = "http://localhost:5173"
+    CORS_ORIGINS: str = ",".join(REQUIRED_CORS_ORIGINS)
 
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/careconnect"
 
@@ -45,7 +65,7 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        return parse_cors_origins(self.CORS_ORIGINS)
 
 
 @lru_cache
